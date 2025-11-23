@@ -68,7 +68,8 @@ table {
   font-size: 0.85rem;
 }
 
-th, td {
+th,
+td {
   border: 1px solid #e5e7eb;
   padding: 0.3rem 0.4rem;
   text-align: left;
@@ -88,11 +89,21 @@ th {
   color: #111827;
 }
 
-.badge-core { background: #bfdbfe; }
-.badge-rotation { background: #bbf7d0; }
-.badge-prospect { background: #fef9c3; }
-.badge-trade { background: #fed7aa; }
-.badge-cut { background: #fecaca; }
+.badge-core {
+  background: #bfdbfe;
+}
+.badge-rotation {
+  background: #bbf7d0;
+}
+.badge-prospect {
+  background: #fef9c3;
+}
+.badge-trade {
+  background: #fed7aa;
+}
+.badge-cut {
+  background: #fecaca;
+}
 
 .section-block {
   margin-bottom: 1rem;

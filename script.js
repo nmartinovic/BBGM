@@ -143,6 +143,7 @@ function analyzeTeam(team) {
   renderCategories(myTeam);
   renderTargets(myTeam, others);
   renderSummary(myTeam);
+  renderRanking(team);
 }
 
 /* ---------- Roles and impact scores ---------- */
@@ -157,14 +158,12 @@ function addRolesAndScores(players) {
 function determineRole(posRaw) {
   const pos = (posRaw || "").toUpperCase();
 
-  // Primary mapping by common BBGM position strings
   if (pos.includes("PG") || pos === "G") return "G";
   if (pos.includes("SG") && !pos.includes("F")) return "G";
   if (pos.includes("C")) return "B";
   if (pos.includes("PF") || pos.includes("FC")) return "B";
   if (pos.includes("SF") || pos.includes("GF") || pos === "F") return "W";
 
-  // Fallbacks
   if (pos.includes("G")) return "G";
   if (pos.includes("F")) return "W";
   return "B";
@@ -252,6 +251,22 @@ function computeGlobalMedianImpact() {
   const mid = Math.floor(scores.length / 2);
   globalMedianImpact =
     scores.length % 2 ? scores[mid] : (scores[mid - 1] + scores[mid]) / 2;
+}
+
+/* ---------- Team power score for rankings ---------- */
+
+function computeTeamPowerScore(teamPlayers) {
+  if (!teamPlayers || !teamPlayers.length) return 0;
+  const sorted = [...teamPlayers].sort(
+    (a, b) => b.impactScore - a.impactScore
+  );
+  const n = Math.min(8, sorted.length);
+  if (!n) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += sorted[i].impactScore;
+  }
+  return sum / n;
 }
 
 /* ---------- Rendering: team overview ---------- */
@@ -355,13 +370,11 @@ function renderLineup(myTeam) {
   const players = [...myTeam];
 
   const starters = pickStarters(players);
-  const starterIds = new Set(
-    starters.map((p) => playerKey(p))
-  );
+  const starterIds = new Set(starters.map((p) => playerKey(p)));
   const remaining = players.filter((p) => !starterIds.has(playerKey(p)));
   const bench = remaining
     .sort((a, b) => b.impactScore - a.impactScore)
-    .slice(0, Math.min(3, remaining.length));
+    .slice(0, Math.min(6, remaining.length));
 
   let html = "";
 
@@ -371,7 +384,9 @@ function renderLineup(myTeam) {
   </div>`;
 
   html += `<div class="section-block">
-    <h3>Recommended main bench (next 3 by impact)</h3>
+    <h3>Recommended main bench (next ${
+      bench.length
+    } by impact, up to 6)</h3>
     ${renderPlayerTable(bench)}
   </div>`;
 
@@ -592,6 +607,24 @@ function renderTargets(myTeam, others) {
     return;
   }
 
+  // Mark "star" players per team (top 2 by impact).
+  const teamPlayersMap = {};
+  allPlayers.forEach((p) => {
+    if (!teamPlayersMap[p.Team]) {
+      teamPlayersMap[p.Team] = [];
+    }
+    teamPlayersMap[p.Team].push(p);
+  });
+
+  Object.keys(teamPlayersMap).forEach((team) => {
+    const arr = teamPlayersMap[team].slice().sort(
+      (a, b) => b.impactScore - a.impactScore
+    );
+    arr.forEach((p, idx) => {
+      p._isStar = idx < 2;
+    });
+  });
+
   const myTop = [...myTeam]
     .sort((a, b) => b.impactScore - a.impactScore)
     .slice(0, Math.min(9, myTeam.length));
@@ -618,27 +651,36 @@ function renderTargets(myTeam, others) {
     const gap = pot - ovr;
     const score = p.impactScore || 0;
 
-    if (
-      ovr >= 60 ||
-      (age <= 24 && gap >= 10 && score >= globalMedianImpact + 5)
-    ) {
-      let fit = score;
-
-      if (needShoot) {
-        fit += Math.max(0, p["3Pt"] - 55) * 0.5;
-      }
-      if (needReb && p.role === "B") {
-        fit += Math.max(0, p.Reb - 60) * 0.3;
-      }
-      if (needDef) {
-        fit += Math.max(0, p.dIQ - 55) * 0.4;
-      }
-      if (needStr) {
-        fit += Math.max(0, p.Str - 55) * 0.3;
-      }
-
-      candidates.push({ player: p, fitScore: fit });
+    // Hard cap: players with Ovr >= 70 are treated as "never traded".
+    if (ovr >= 70) {
+      return;
     }
+
+    // Heuristic: don't suggest young core stars (top-2 on team, very good, <=30).
+    if (p._isStar && ovr >= 65 && age <= 30) {
+      return;
+    }
+
+    const isImpactCandidate =
+      ovr >= 60 || (age <= 24 && gap >= 10 && score >= globalMedianImpact + 5);
+    if (!isImpactCandidate) return;
+
+    let fit = score;
+
+    if (needShoot) {
+      fit += Math.max(0, p["3Pt"] - 55) * 0.5;
+    }
+    if (needReb && p.role === "B") {
+      fit += Math.max(0, p.Reb - 60) * 0.3;
+    }
+    if (needDef) {
+      fit += Math.max(0, p.dIQ - 55) * 0.4;
+    }
+    if (needStr) {
+      fit += Math.max(0, p.Str - 55) * 0.3;
+    }
+
+    candidates.push({ player: p, fitScore: fit });
   });
 
   candidates.sort((a, b) => b.fitScore - a.fitScore);
@@ -650,7 +692,7 @@ function renderTargets(myTeam, others) {
     return;
   }
 
-  let html = `<p>Top suggested targets (max 15), based on your current weaknesses.</p>`;
+  let html = `<p>Top suggested targets (max 15), excluding obvious untouchables (Ovr ≥ 70 and most team stars).</p>`;
   html += `<table>
     <thead>
       <tr>
@@ -771,6 +813,71 @@ function renderSummary(myTeam) {
   )} vs ${allPotGap.toFixed(1)})</li>`;
 
   html += "</ul>";
+
+  container.innerHTML = html;
+}
+
+/* ---------- Rendering: team ranking vs league ---------- */
+
+function renderRanking(selectedTeam) {
+  const container = document.getElementById("ranking");
+
+  const teamPower = [];
+
+  const teamsSet = new Set(allPlayers.map((p) => p.Team));
+  teamsSet.forEach((team) => {
+    const players = allPlayers.filter((p) => p.Team === team);
+    const score = computeTeamPowerScore(players);
+    teamPower.push({ team, score });
+  });
+
+  teamPower.sort((a, b) => b.score - a.score);
+
+  const rankIndex = teamPower.findIndex((t) => t.team === selectedTeam);
+  if (rankIndex === -1) {
+    container.innerHTML = "<p>Unable to compute ranking for this team.</p>";
+    return;
+  }
+
+  const myEntry = teamPower[rankIndex];
+  const totalTeams = teamPower.length;
+
+  let html = "";
+  html += `<div class="section-block">
+    <h3>Overall team strength</h3>
+    <p>Your team power score (avg impact of top 8 players): ${myEntry.score.toFixed(
+      1
+    )}</p>
+    <p>League teams: ${totalTeams}. Your rank: ${
+    rankIndex + 1
+  } of ${totalTeams}.</p>
+  </div>`;
+
+  const topN = Math.min(10, teamPower.length);
+  html += `<div class="section-block">
+    <h3>Top ${topN} teams by power score</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Team</th>
+          <th>Power score</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+  for (let i = 0; i < topN; i++) {
+    const t = teamPower[i];
+    html += `<tr>
+      <td>${i + 1}</td>
+      <td>${t.team}${
+        t.team === selectedTeam ? " (you)" : ""
+      }</td>
+      <td>${t.score.toFixed(1)}</td>
+    </tr>`;
+  }
+
+  html += "</tbody></table></div>";
 
   container.innerHTML = html;
 }
