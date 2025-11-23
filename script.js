@@ -134,7 +134,11 @@ function normalizePlayer(row) {
 
 function analyzeTeam(team) {
   const myTeam = allPlayers.filter((p) => p.Team === team);
-  const others = allPlayers.filter((p) => p.Team !== team);
+  const freeAgents = allPlayers.filter((p) => p.Team === "FA");
+  const draftPicks = allPlayers.filter((p) => p.Team === "DP");
+  const others = allPlayers.filter(
+    (p) => p.Team !== team && p.Team !== "FA" && p.Team !== "DP"
+  );
 
   if (!myTeam.length) return;
 
@@ -142,6 +146,8 @@ function analyzeTeam(team) {
   renderLineup(myTeam);
   renderCategories(myTeam);
   renderTargets(myTeam, others);
+  renderFreeAgents(myTeam, freeAgents);
+  renderDraftPicks(myTeam, draftPicks);
   renderSummary(myTeam);
   renderRanking(team);
 }
@@ -597,7 +603,7 @@ function categorizePlayer(p, teamMedianImpact) {
   return "Trade";
 }
 
-/* ---------- Rendering: targets ---------- */
+/* ---------- Rendering: trade targets (other teams) ---------- */
 
 function renderTargets(myTeam, others) {
   const container = document.getElementById("targets");
@@ -607,7 +613,7 @@ function renderTargets(myTeam, others) {
     return;
   }
 
-  // Mark "star" players per team (top 2 by impact).
+  // mark team stars (top 2 per team) as "less tradable"
   const teamPlayersMap = {};
   allPlayers.forEach((p) => {
     if (!teamPlayersMap[p.Team]) {
@@ -651,12 +657,10 @@ function renderTargets(myTeam, others) {
     const gap = pot - ovr;
     const score = p.impactScore || 0;
 
-    // Hard cap: players with Ovr >= 70 are treated as "never traded".
-    if (ovr >= 70) {
-      return;
-    }
+    // hard cap: players with Ovr >= 70 treated as never traded
+    if (ovr >= 70) return;
 
-    // Heuristic: don't suggest young core stars (top-2 on team, very good, <=30).
+    // avoid obvious young stars (top-2 on team, good, <=30)
     if (p._isStar && ovr >= 65 && age <= 30) {
       return;
     }
@@ -666,7 +670,6 @@ function renderTargets(myTeam, others) {
     if (!isImpactCandidate) return;
 
     let fit = score;
-
     if (needShoot) {
       fit += Math.max(0, p["3Pt"] - 55) * 0.5;
     }
@@ -688,11 +691,11 @@ function renderTargets(myTeam, others) {
 
   if (!top.length) {
     container.innerHTML =
-      "<p>No obvious targets based on current thresholds.</p>";
+      "<p>No obvious trade targets based on current thresholds.</p>";
     return;
   }
 
-  let html = `<p>Top suggested targets (max 15), excluding obvious untouchables (Ovr ≥ 70 and most team stars).</p>`;
+  let html = `<p>Top suggested trade targets (max 15), excluding obvious untouchables (Ovr ≥ 70 and most team stars).</p>`;
   html += `<table>
     <thead>
       <tr>
@@ -723,6 +726,235 @@ function renderTargets(myTeam, others) {
       <td>${p.Ovr}</td>
       <td>${p.impactScore.toFixed(1)}</td>
       <td>${fitScore.toFixed(1)}</td>
+      <td>${p["3Pt"]}</td>
+      <td>${p.Str}</td>
+      <td>${p.Reb}</td>
+      <td>${p.oIQ}</td>
+      <td>${p.dIQ}</td>
+    </tr>`;
+  });
+
+  html += "</tbody></table>";
+  container.innerHTML = html;
+}
+
+/* ---------- Rendering: free agents ---------- */
+
+function renderFreeAgents(myTeam, freeAgents) {
+  const container = document.getElementById("freeAgents");
+
+  if (!freeAgents.length) {
+    container.innerHTML = "<p>No free agents (Team = FA) in this file.</p>";
+    return;
+  }
+
+  const myTop = [...myTeam]
+    .sort((a, b) => b.impactScore - a.impactScore)
+    .slice(0, Math.min(9, myTeam.length));
+
+  const avg = (arr) =>
+    arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+
+  const team3 = avg(myTop.map((p) => p["3Pt"]));
+  const teamReb = avg(myTop.map((p) => p.Reb));
+  const teamDIQ = avg(myTop.map((p) => p.dIQ));
+  const teamStr = avg(myTop.map((p) => p.Str));
+
+  const needShoot = team3 < 55;
+  const needReb = teamReb < 55;
+  const needDef = teamDIQ < 55;
+  const needStr = teamStr < 55;
+
+  const candidates = [];
+
+  freeAgents.forEach((p) => {
+    const ovr = val(p.Ovr);
+    const age = val(p.Age);
+    const pot = val(p.Pot);
+    const gap = pot - ovr;
+    const score = p.impactScore || 0;
+
+    // baseline thresholds for FAs
+    const isCandidate =
+      ovr >= 55 || (age <= 26 && gap >= 8 && score >= globalMedianImpact);
+    if (!isCandidate) return;
+
+    let fit = score;
+    if (needShoot) {
+      fit += Math.max(0, p["3Pt"] - 55) * 0.5;
+    }
+    if (needReb && p.role === "B") {
+      fit += Math.max(0, p.Reb - 60) * 0.3;
+    }
+    if (needDef) {
+      fit += Math.max(0, p.dIQ - 55) * 0.4;
+    }
+    if (needStr) {
+      fit += Math.max(0, p.Str - 55) * 0.3;
+    }
+
+    // small bonus if they're young with upside
+    if (age <= 24 && gap >= 10) {
+      fit += 5;
+    }
+
+    candidates.push({ player: p, fitScore: fit });
+  });
+
+  candidates.sort((a, b) => b.fitScore - a.fitScore);
+  const top = candidates.slice(0, Math.min(15, candidates.length));
+
+  if (!top.length) {
+    container.innerHTML =
+      "<p>No free agents look like meaningful upgrades with current thresholds.</p>";
+    return;
+  }
+
+  let html = `<p>Free agents (Team = FA) that fit your roster needs (max 15).</p>`;
+  html += `<table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Pos</th>
+        <th>Role</th>
+        <th>Age</th>
+        <th>Ovr</th>
+        <th>Pot</th>
+        <th>Impact</th>
+        <th>FitScore</th>
+        <th>3Pt</th>
+        <th>Str</th>
+        <th>Reb</th>
+        <th>oIQ</th>
+        <th>dIQ</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  top.forEach(({ player: p, fitScore }) => {
+    html += `<tr>
+      <td>${escapeHtml(p.Name)}</td>
+      <td>${escapeHtml(p.Pos)}</td>
+      <td>${p.role}</td>
+      <td>${p.Age}</td>
+      <td>${p.Ovr}</td>
+      <td>${p.Pot}</td>
+      <td>${p.impactScore.toFixed(1)}</td>
+      <td>${fitScore.toFixed(1)}</td>
+      <td>${p["3Pt"]}</td>
+      <td>${p.Str}</td>
+      <td>${p.Reb}</td>
+      <td>${p.oIQ}</td>
+      <td>${p.dIQ}</td>
+    </tr>`;
+  });
+
+  html += "</tbody></table>";
+  container.innerHTML = html;
+}
+
+/* ---------- Rendering: draft picks ---------- */
+
+function renderDraftPicks(myTeam, draftPicks) {
+  const container = document.getElementById("draftPicks");
+
+  if (!draftPicks.length) {
+    container.innerHTML = "<p>No draft picks (Team = DP) in this file.</p>";
+    return;
+  }
+
+  const myTop = [...myTeam]
+    .sort((a, b) => b.impactScore - a.impactScore)
+    .slice(0, Math.min(9, myTeam.length));
+
+  const avg = (arr) =>
+    arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+
+  const team3 = avg(myTop.map((p) => p["3Pt"]));
+  const teamReb = avg(myTop.map((p) => p.Reb));
+  const teamDIQ = avg(myTop.map((p) => p.dIQ));
+  const teamStr = avg(myTop.map((p) => p.Str));
+
+  const needShoot = team3 < 55;
+  const needReb = teamReb < 55;
+  const needDef = teamDIQ < 55;
+  const needStr = teamStr < 55;
+
+  const candidates = [];
+
+  draftPicks.forEach((p) => {
+    const ovr = val(p.Ovr);
+    const age = val(p.Age);
+    const pot = val(p.Pot);
+    const gap = pot - ovr;
+    const score = p.impactScore || 0;
+
+    // basic prospect viability
+    const isProspect =
+      age <= 25 && pot >= 60 && gap >= 8 && score >= globalMedianImpact * 0.7;
+    if (!isProspect) return;
+
+    // prospect score: mix of current ability, potential, gap, age
+    let prospectScore =
+      0.4 * score + 0.4 * pot + 0.2 * gap - Math.max(0, age - 22) * 2;
+
+    // adjust for team needs
+    if (needShoot) {
+      prospectScore += Math.max(0, p["3Pt"] - 55) * 0.3;
+    }
+    if (needReb && p.role === "B") {
+      prospectScore += Math.max(0, p.Reb - 60) * 0.2;
+    }
+    if (needDef) {
+      prospectScore += Math.max(0, p.dIQ - 55) * 0.25;
+    }
+    if (needStr) {
+      prospectScore += Math.max(0, p.Str - 55) * 0.2;
+    }
+
+    candidates.push({ player: p, prospectScore });
+  });
+
+  candidates.sort((a, b) => b.prospectScore - a.prospectScore);
+  const top = candidates.slice(0, Math.min(15, candidates.length));
+
+  if (!top.length) {
+    container.innerHTML =
+      "<p>No draft prospects stand out given current thresholds.</p>";
+    return;
+  }
+
+  let html = `<p>Draft picks (Team = DP) ranked by prospect score (max 15).</p>`;
+  html += `<table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Pos</th>
+        <th>Role</th>
+        <th>Age</th>
+        <th>Ovr</th>
+        <th>Pot</th>
+        <th>Impact</th>
+        <th>ProspectScore</th>
+        <th>3Pt</th>
+        <th>Str</th>
+        <th>Reb</th>
+        <th>oIQ</th>
+        <th>dIQ</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  top.forEach(({ player: p, prospectScore }) => {
+    html += `<tr>
+      <td>${escapeHtml(p.Name)}</td>
+      <td>${escapeHtml(p.Pos)}</td>
+      <td>${p.role}</td>
+      <td>${p.Age}</td>
+      <td>${p.Ovr}</td>
+      <td>${p.Pot}</td>
+      <td>${p.impactScore.toFixed(1)}</td>
+      <td>${prospectScore.toFixed(1)}</td>
       <td>${p["3Pt"]}</td>
       <td>${p.Str}</td>
       <td>${p.Reb}</td>
@@ -824,7 +1056,11 @@ function renderRanking(selectedTeam) {
 
   const teamPower = [];
 
-  const teamsSet = new Set(allPlayers.map((p) => p.Team));
+  const teamsSet = new Set(
+    allPlayers
+      .map((p) => p.Team)
+      .filter((t) => t !== "FA" && t !== "DP")
+  );
   teamsSet.forEach((team) => {
     const players = allPlayers.filter((p) => p.Team === team);
     const score = computeTeamPowerScore(players);
@@ -835,7 +1071,8 @@ function renderRanking(selectedTeam) {
 
   const rankIndex = teamPower.findIndex((t) => t.team === selectedTeam);
   if (rankIndex === -1) {
-    container.innerHTML = "<p>Unable to compute ranking for this team.</p>";
+    container.innerHTML =
+      "<p>Ranking is only computed for league teams (not FA/DP).</p>";
     return;
   }
 
@@ -870,9 +1107,7 @@ function renderRanking(selectedTeam) {
     const t = teamPower[i];
     html += `<tr>
       <td>${i + 1}</td>
-      <td>${t.team}${
-        t.team === selectedTeam ? " (you)" : ""
-      }</td>
+      <td>${t.team}${t.team === selectedTeam ? " (you)" : ""}</td>
       <td>${t.score.toFixed(1)}</td>
     </tr>`;
   }
