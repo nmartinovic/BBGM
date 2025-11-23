@@ -1,398 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BBGM "Moneyball" Analyzer v3</title>
-    <style>
-        :root {
-            --bg: #0f172a;
-            --card: #1e293b;
-            --text: #e2e8f0;
-            --accent: #38bdf8;
-            --green: #4ade80;
-            --red: #f87171;
-            --yellow: #facc15;
-            --purple: #c084fc;
-            --muted: #94a3b8;
-            --orange: #fb923c;
-        }
-        body {
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 20px;
-        }
-        .container { max-width: 1400px; margin: 0 auto; }
-        h1 { color: var(--accent); margin-bottom: 5px; }
-        h2 { color: var(--text); border-bottom: 2px solid #334155; padding-bottom: 10px; margin-top: 0; font-size: 1.2rem;}
-        p { color: var(--muted); margin-top: 0; font-size: 0.9rem;}
-        
-        /* Upload Section */
-        .upload-box {
-            background: var(--card);
-            padding: 1.5rem;
-            border-radius: 12px;
-            border: 2px dashed var(--accent);
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        input[type="file"] { color: var(--text); }
-        select, button {
-            padding: 10px 15px;
-            background: #334155;
-            color: white;
-            border: 1px solid #475569;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-left: 10px;
-        }
-        button { background: var(--accent); color: var(--bg); border: none; }
-        button:hover { opacity: 0.9; }
-
-        /* Grid Layout */
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
-            gap: 20px;
-        }
-        .card {
-            background: var(--card);
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            height: fit-content;
-        }
-        
-        /* Tables */
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
-        th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 4px; border-bottom: 1px solid #334155; }
-        td { padding: 6px 4px; border-bottom: 1px solid #334155; }
-        tr:last-child td { border-bottom: none; }
-        
-        /* Visual Indicators */
-        .stat-val { font-weight: bold; font-family: monospace; }
-        .val-elite { color: var(--purple); }
-        .val-good { color: var(--green); }
-        .val-mid { color: var(--yellow); }
-        .val-bad { color: var(--red); }
-        .val-exp { color: var(--orange); } /* Expensive */
-        
-        .section-header {
-            background: #334155;
-            color: #fff;
-            font-weight: bold;
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 1px;
-        }
-
-        .tag {
-            display: inline-block;
-            font-size: 0.65em;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-left: 4px;
-            font-weight: 700;
-            text-transform: uppercase;
-            color: #1e1e2e;
-        }
-        .tag-bh { background: var(--accent); color: white; }
-        .tag-big { background: var(--green); color: white; }
-        .tag-steal { background: var(--green); color: #0f172a; }
-        .tag-exp { background: var(--orange); color: white; }
-
-        #teamSelectorArea { display: none; margin-top: 20px; }
-    </style>
+  <meta charset="UTF-8" />
+  <title>BBGM Roster Helper</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
+  <header>
+    <h1>BBGM Roster Helper</h1>
+    <p>Upload a Basketball GM ratings CSV, select your team, and get lineup and roster suggestions.</p>
+  </header>
 
-<div class="container">
-    <h1>🏀 BBGM Roster Architect v3.0</h1>
-    <p>Upload <strong>Player Ratings</strong> CSV. Optimizes rotation order and identifies undervalued trade targets.</p>
-    
-    <div class="upload-box">
-        <input type="file" id="csvInput" accept=".csv" />
-        <div id="teamSelectorArea">
-            <label for="teamSelect">Your Team:</label>
-            <select id="teamSelect"></select>
-            <button onclick="runAnalysis()">Analyze Roster</button>
-        </div>
-    </div>
+  <main>
+    <section class="card">
+      <h2>1. Upload roster file</h2>
+      <p>Use a ratings export CSV (same columns as your <code>player ratings</code> export).</p>
+      <input type="file" id="fileInput" accept=".csv" />
+      <div id="fileError" class="error"></div>
+    </section>
 
-    <div id="results" class="grid" style="display: none;">
-        
-        <!-- 1. Game Plan (Rotation) -->
-        <div class="card" style="border-top: 4px solid var(--accent);">
-            <h2>📋 Game Plan & Rotation</h2>
-            <p>Set your lineup in this exact order. Engine prioritizes top bench players.</p>
-            <table id="rotationTable">
-                <thead><tr><th>Slot</th><th>Name (Age)</th><th>Role</th><th title="Current Ability">Meta</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
+    <section class="card">
+      <h2>2. Select your team</h2>
+      <select id="teamSelect" disabled>
+        <option value="">Upload a file first</option>
+      </select>
+    </section>
 
-        <!-- 2. Trade Targets -->
-        <div class="card" style="border-top: 4px solid var(--green);">
-            <h2>🎯 Trade Targets (Physicals > OVR)</h2>
-            <p>Players with elite tools. "Steals" have lower Potential (easier to trade for).</p>
-            <table id="targetTable">
-                <thead><tr><th>Name (Age)</th><th>Team</th><th title="Potential determines trade difficulty">Pot</th><th>Type</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
+    <section class="card">
+      <h2>3. Team overview</h2>
+      <div id="teamOverview"></div>
+    </section>
 
-        <!-- 3. Stash / Projects -->
-        <div class="card" style="border-top: 4px solid var(--purple);">
-            <h2>💎 Development Projects</h2>
-            <p>Young (<=24). Keep them even if their OVR is low. Their physicals will let them grow.</p>
-            <table id="projectTable">
-                <thead><tr><th>Name (Age)</th><th>Physical Score</th><th>Status</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
+    <section class="card">
+      <h2>4. Lineup recommendations</h2>
+      <div id="lineup"></div>
+    </section>
 
-        <!-- 4. Trade Bait / Cuts -->
-        <div class="card" style="border-top: 4px solid var(--red);">
-            <h2>✂️ Cuts / Salary Dumps</h2>
-            <p>Players with low ceilings or declining athleticism.</p>
-            <table id="cutTable">
-                <thead><tr><th>Name (Age)</th><th>Issue</th><th>Meta</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-</div>
+    <section class="card">
+      <h2>5. Player categories (keep / trade / cut / prospects)</h2>
+      <div id="categories"></div>
+    </section>
 
-<script>
-    let allPlayers = [];
-    let teams = new Set();
+    <section class="card">
+      <h2>6. Players to target</h2>
+      <div id="targets"></div>
+    </section>
 
-    document.getElementById('csvInput').addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(e) { parseCSV(e.target.result); };
-        reader.readAsText(file);
-    });
+    <section class="card">
+      <h2>7. Strengths and weaknesses</h2>
+      <div id="summary"></div>
+    </section>
+  </main>
 
-    function parseCSV(csv) {
-        const lines = csv.split('\n');
-        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-        
-        // Validation
-        if (!headers.includes('Hgt') && !headers.includes('hgt')) {
-            alert("⚠️ Wrong File! Please upload 'Player Ratings'.");
-            return;
-        }
+  <footer>
+    <p>BBGM helper – personal tool.</p>
+  </footer>
 
-        allPlayers = [];
-        teams.clear();
-
-        for(let i = 1; i < lines.length; i++) {
-            if(!lines[i].trim()) continue;
-            const currentline = lines[i].split(',');
-            let player = {};
-            
-            for(let j = 0; j < headers.length; j++) {
-                let header = headers[j].toLowerCase().replace('%','').replace(' ','');
-                let val = currentline[j];
-                if(!isNaN(val) && val.trim() !== "") val = parseFloat(val);
-                player[header] = val;
-            }
-            
-            calculateMetrics(player);
-            if(player.team && player.team !== "") teams.add(player.team);
-            allPlayers.push(player);
-        }
-
-        const select = document.getElementById('teamSelect');
-        select.innerHTML = '';
-        Array.from(teams).sort().forEach(t => {
-            let opt = document.createElement('option');
-            opt.value = t;
-            opt.innerHTML = t;
-            select.appendChild(opt);
-        });
-        document.getElementById('teamSelectorArea').style.display = 'block';
-    }
-
-    function calculateMetrics(p) {
-        const get = (val) => (typeof val === 'number' && !isNaN(val)) ? val : 0;
-
-        // 1. Meta Score (Current Game Impact)
-        p.metaScore = (
-            (get(p.hgt) * 2.8) + 
-            (get(p.spd) * 1.0) + 
-            (get(p.jmp) * 0.8) + 
-            (get(p.oiq) * 1.5) + 
-            (get(p.diq) * 1.2) + 
-            (get(p.drb) * 0.8) + 
-            (get(p.pss) * 0.8) + 
-            (get(p.reb) * 0.8) + 
-            (get(p['3pt']) * 0.6) 
-        );
-
-        // 2. Physical Ceiling
-        p.physicalScore = (get(p.hgt) * 2.5) + get(p.spd) + get(p.jmp) + (get(p.str) * 0.5);
-
-        // 3. Functional Tags
-        p.isBallHandler = (get(p.drb) + get(p.pss)) / 2 > 50;
-        p.isBig = get(p.hgt) > 60 || (get(p.hgt) > 50 && get(p.str) > 60);
-        
-        // 4. Pot Value (for Trading Difficulty)
-        p.pot = get(p.pot); 
-    }
-
-    function runAnalysis() {
-        const myTeamName = document.getElementById('teamSelect').value;
-        const myPlayers = allPlayers.filter(p => p.team === myTeamName);
-        const otherPlayers = allPlayers.filter(p => p.team !== myTeamName);
-
-        document.getElementById('results').style.display = 'grid';
-        
-        buildRotation(myPlayers);
-        buildProjects(myPlayers);
-        buildCuts(myPlayers);
-        buildTargets(otherPlayers);
-    }
-
-    function buildRotation(roster) {
-        // 1. Identify Starters (Top 5 by Meta, ensuring 1 Handler)
-        let sorted = [...roster].sort((a, b) => b.metaScore - a.metaScore);
-        let starters = sorted.slice(0, 5);
-
-        let hasHandler = starters.some(p => p.isBallHandler);
-        if (!hasHandler) {
-            let bestHandler = sorted.slice(5).find(p => p.isBallHandler);
-            if (bestHandler) {
-                starters.pop(); 
-                starters.push(bestHandler);
-            }
-        }
-        // Sort starters by Meta for display
-        starters.sort((a, b) => b.metaScore - a.metaScore);
-
-        // 2. Identify Bench (Remaining players, sorted STRICTLY by Meta Score)
-        // The engine uses list order for subs. You want best players at 6, 7, 8.
-        let bench = sorted.filter(p => !starters.includes(p));
-        bench.sort((a, b) => b.metaScore - a.metaScore);
-
-        const tbody = document.querySelector('#rotationTable tbody');
-        tbody.innerHTML = '';
-
-        // Helper to render row
-        const renderRow = (p, role, slot) => {
-            let colorClass = p.metaScore > 600 ? 'val-elite' : (p.metaScore > 500 ? 'val-good' : 'val-mid');
-            let tags = "";
-            if(p.isBallHandler) tags += `<span class="tag tag-bh">BH</span>`;
-            if(p.isBig) tags += `<span class="tag tag-big">Big</span>`;
-
-            return `<tr>
-                <td><span style="color:var(--muted)">${slot}</span></td>
-                <td><b>${p.name}</b> <small>(${p.age})</small>${tags}</td>
-                <td>${role}</td>
-                <td class="${colorClass} stat-val">${Math.round(p.metaScore)}</td>
-            </tr>`;
-        };
-
-        // Render Starters
-        tbody.innerHTML += `<tr class="section-header"><td colspan="4">Starters</td></tr>`;
-        starters.forEach((p, i) => tbody.innerHTML += renderRow(p, "Starter", i+1));
-
-        // Render Bench
-        tbody.innerHTML += `<tr class="section-header"><td colspan="4">Bench (In Order)</td></tr>`;
-        bench.forEach((p, i) => {
-            let role = i < 3 ? "Rotation" : (i < 5 ? "Deep Bench" : "Reserve");
-            tbody.innerHTML += renderRow(p, role, i+6);
-        });
-    }
-
-    function buildProjects(roster) {
-        const tbody = document.querySelector('#projectTable tbody');
-        tbody.innerHTML = '';
-
-        // Young players only
-        let projects = roster.filter(p => p.age <= 24);
-        projects.sort((a, b) => b.physicalScore - a.physicalScore);
-
-        projects.forEach(p => {
-            let status = "";
-            if(p.physicalScore > 200) status = `<span class="val-elite">Elite Athlete</span>`;
-            else if(p.physicalScore > 160) status = `<span class="val-good">Solid</span>`;
-            else status = `<span class="val-bad">Limited</span>`;
-
-            tbody.innerHTML += `<tr>
-                <td><b>${p.name}</b> <small>(${p.age})</small></td>
-                <td class="stat-val">${Math.round(p.physicalScore)}</td>
-                <td>${status}</td>
-            </tr>`;
-        });
-    }
-
-    function buildCuts(roster) {
-        const tbody = document.querySelector('#cutTable tbody');
-        tbody.innerHTML = '';
-
-        let cuts = roster.filter(p => {
-            // Old and bad
-            if (p.age > 26 && p.metaScore < 420) return true;
-            // Young and unathletic (No hope)
-            if (p.age <= 25 && p.physicalScore < 140 && p.metaScore < 400) return true;
-            return false;
-        });
-
-        cuts.sort((a, b) => a.metaScore - b.metaScore);
-
-        if (cuts.length === 0) tbody.innerHTML = '<tr><td colspan="3">Roster looks clean!</td></tr>';
-
-        cuts.forEach(p => {
-            let reason = p.age > 26 ? "Declining" : "No Physical Upside";
-            tbody.innerHTML += `<tr>
-                <td>${p.name}</td>
-                <td>${p.age}</td>
-                <td class="val-bad">${reason}</td>
-            </tr>`;
-        });
-    }
-
-    function buildTargets(others) {
-        const tbody = document.querySelector('#targetTable tbody');
-        tbody.innerHTML = '';
-
-        // Target Logic: High Physicals + Youth
-        let targets = others.filter(p => {
-            let isFreak = p.age <= 23 && p.hgt > 58 && p.spd > 55;
-            let isYoungElite = p.age <= 24 && p.physicalScore > 200;
-            return isFreak || isYoungElite;
-        });
-
-        // Sort by physical ceiling
-        targets.sort((a, b) => b.physicalScore - a.physicalScore);
-
-        targets.slice(0, 10).forEach(p => {
-            let potClass = p.pot > 65 ? "val-exp" : "val-good";
-            let typeTag = "";
-            
-            // Trade Difficulty Logic
-            if (p.pot > 65) typeTag = `<span class="tag tag-exp">Expensive</span>`;
-            else if (p.pot < 55) typeTag = `<span class="tag tag-steal">Steal</span>`;
-            else typeTag = `<span class="tag" style="background:#ccc">Fair</span>`;
-
-            let archetype = "Athlete";
-            if (p.hgt > 70) archetype = "Big Man";
-            if (p.drb > 50) archetype = "Handler";
-
-            tbody.innerHTML += `<tr>
-                <td><b>${p.name}</b> <small>(${p.age})</small> <br><small>${p.team}</small></td>
-                <td class="${potClass} stat-val">${p.pot}</td>
-                <td>${archetype} ${typeTag}</td>
-            </tr>`;
-        });
-    }
-</script>
-
+  <script src="script.js"></script>
 </body>
 </html>
