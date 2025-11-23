@@ -580,19 +580,28 @@ function categorizePlayer(p, teamMedianImpact) {
   const gap = pot - ovr;
   const score = p.impactScore || 0;
 
+  // High-ceiling prospects: protect them from being Cut
+  const highCeilingProspect = age <= 24 && pot >= 60 && gap >= 8;
+  const eliteCeilingProspect = age <= 26 && pot >= 70 && gap >= 5;
+
+  // Clear core players first
   if (ovr >= 60 && score >= teamMedianImpact + 3 && age <= 29) {
     return "Core";
   }
 
-  const isProspect = age <= 23 && gap >= 10 && ovr >= 50;
-  if (isProspect) {
+  // Prospect rules (old base rule + new high-potential rules)
+  const baseProspect = age <= 23 && gap >= 10 && ovr >= 50;
+
+  if (highCeilingProspect || eliteCeilingProspect || baseProspect) {
     return "Prospect";
   }
 
+  // Solid rotation piece
   if (ovr >= 55 && score >= teamMedianImpact - 5) {
     return "Rotation";
   }
 
+  // Low-end pieces: can be cut
   if (
     ovr < 50 ||
     (score < teamMedianImpact - 8 && gap < 8 && age >= 25)
@@ -600,6 +609,7 @@ function categorizePlayer(p, teamMedianImpact) {
     return "Cut";
   }
 
+  // Everything else is trade bait / filler
   return "Trade";
 }
 
