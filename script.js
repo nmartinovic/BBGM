@@ -1139,64 +1139,226 @@ function renderSummary(myTeam) {
 
 /* ---------- Rendering: team ranking vs league ---------- */
 
+/* ---------- Rendering: team ranking vs league ---------- */
+
 function renderRanking(selectedTeam) {
   const container = document.getElementById("ranking");
 
-  const teamPower = [];
+  // Collect per-team meta: raw power, rotation age, role mix
+  const teamMeta = [];
 
   const teamsSet = new Set(
     allPlayers
       .map((p) => p.Team)
       .filter((t) => t !== "FA" && t !== "DP")
   );
+
   teamsSet.forEach((team) => {
     const players = allPlayers.filter((p) => p.Team === team);
-    const score = computeTeamPowerScore(players);
-    teamPower.push({ team, score });
+    if (!players.length) {
+      return;
+    }
+
+    const sorted = [...players].sort(
+      (a, b) => b.impactScore - a.impactScore
+    );
+    const top = sorted.slice(0, Math.min(8, sorted.length));
+
+    const basePower = computeTeamPowerScore(players);
+
+    let sumAge = 0;
+    let count = 0;
+    let countG = 0;
+    let countW = 0;
+    let countB = 0;
+
+    top.forEach((p) => {
+      const age = val(p.Age);
+      sumAge += age;
+      count += 1;
+      if (p.role === "G") countG += 1;
+      else if (p.role === "W") countW += 1;
+      else if (p.role === "B") countB += 1;
+    });
+
+    const avgAge = count ? sumAge / count : 0;
+
+    teamMeta.push({
+      team,
+      basePower,
+      avgAge,
+      countG,
+      countW,
+      countB,
+      adjPower: basePower, // will adjust below
+    });
   });
 
-  teamPower.sort((a, b) => b.score - a.score);
+  if (!teamMeta.length) {
+    container.innerHTML =
+      "<p>Ranking is only computed for league teams (not FA/DP).</p>";
+    return;
+  }
 
-  const rankIndex = teamPower.findIndex((t) => t.team === selectedTeam);
+  // League-wide average rotation age
+  const leagueAvgAge =
+    teamMeta.reduce((s, t) => s + t.avgAge, 0) / teamMeta.length;
+
+  // Apply age and positional adjustments to power score
+  teamMeta.forEach((t) => {
+    let adj = t.basePower;
+
+    // Age adjustment (older teams tend to underperform talent)
+    const ageDiff = t.avgAge - leagueAvgAge;
+    if (ageDiff > 3) {
+      adj -= 4; // very old rotation
+    } else if (ageDiff > 1.5) {
+      adj -= 2; // somewhat old
+    } else if (ageDiff < -3) {
+      adj += 2; // very young, some upside
+    } else if (ageDiff < -1.5) {
+      adj += 1; // somewhat young
+    }
+
+    // Positional balance in top 8
+    // Need at least one guard and one big; depth of each also matters a bit.
+    if (t.countG === 0) adj -= 5;
+    else if (t.countG === 1) adj -= 2;
+
+    if (t.countB === 0) adj -= 5;
+    else if (t.countB === 1) adj -= 2;
+
+    t.adjPower = adj;
+  });
+
+  // Sort by adjusted power score
+  teamMeta.sort((a, b) => b.adjPower - a.adjPower);
+
+  const rankIndex = teamMeta.findIndex(
+    (t) => t.team === selectedTeam
+  );
   if (rankIndex === -1) {
     container.innerHTML =
       "<p>Ranking is only computed for league teams (not FA/DP).</p>";
     return;
   }
 
-  const myEntry = teamPower[rankIndex];
-  const totalTeams = teamPower.length;
+  const totalTeams = teamMeta.length;
+  const myEntry = teamMeta[rankIndex];
+  const myRank = rankIndex + 1;
 
+  // Heuristic win-range based on rank tier
+  let winBandText = "";
+  if (myRank <= 3) {
+    winBandText =
+      "Projected wins: ~52–60 (title contender tier).";
+  } else if (myRank <= 6) {
+    winBandText =
+      "Projected wins: ~48–55 (strong playoff team).";
+  } else if (myRank <= 10) {
+    winBandText =
+      "Projected wins: ~44–52 (playoff caliber).";
+  } else if (myRank <= 16) {
+    winBandText =
+      "Projected wins: ~38–46 (play-in / fringe playoff).";
+  } else if (myRank <= 22) {
+    winBandText =
+      "Projected wins: ~32–40 (lottery team).";
+  } else {
+    winBandText = "Projected wins: ~25–35 (rebuild tier).";
+  }
+
+  // Risk flags for your team
+  const warnings = [];
+  const ageDiff = myEntry.avgAge - leagueAvgAge;
+
+  if (ageDiff > 1.5) {
+    warnings.push(
+      `Old rotation: avg age ${myEntry.avgAge.toFixed(
+        1
+      )} vs league ${leagueAvgAge.toFixed(
+        1
+      )} – higher risk of decline and injuries.`
+    );
+  } else if (ageDiff < -1.5) {
+    warnings.push(
+      `Very young rotation: avg age ${myEntry.avgAge.toFixed(
+        1
+      )} vs league ${leagueAvgAge.toFixed(
+        1
+      )} – performance may be volatile.`
+    );
+  }
+
+  if (myEntry.countG <= 1) {
+    warnings.push(
+      "Limited guard depth in top 8 – ball handling and creation may be an issue."
+    );
+  }
+  if (myEntry.countB <= 1) {
+    warnings.push(
+      "Limited big depth in top 8 – interior defense and rebounding may be an issue."
+    );
+  }
+  if (myEntry.countG >= 3 && myEntry.countB <= 1) {
+    warnings.push(
+      "Very small top-8 rotation – could struggle on the boards and against strong bigs."
+    );
+  }
+
+  // Build HTML
   let html = "";
+
   html += `<div class="section-block">
     <h3>Overall team strength</h3>
-    <p>Your team power score (avg impact of top 8 players): ${myEntry.score.toFixed(
+    <p>Raw team power score (avg impact of top 8): ${myEntry.basePower.toFixed(
       1
     )}</p>
-    <p>League teams: ${totalTeams}. Your rank: ${
-    rankIndex + 1
-  } of ${totalTeams}.</p>
+    <p>Adjusted team power score (age & positional balance): ${myEntry.adjPower.toFixed(
+      1
+    )}</p>
+    <p>League teams: ${totalTeams}. Your rank: ${myRank} of ${totalTeams}.</p>
+    <p>${winBandText}</p>
   </div>`;
 
-  const topN = Math.min(10, teamPower.length);
+  if (warnings.length) {
+    html += `<div class="section-block">
+      <h4>Risk flags</h4>
+      <ul>`;
+    warnings.forEach((w) => {
+      html += `<li>${w}</li>`;
+    });
+    html += `</ul></div>`;
+  } else {
+    html += `<div class="section-block">
+      <h4>Risk flags</h4>
+      <p>No major structural red flags; performance should track talent fairly closely.</p>
+    </div>`;
+  }
+
+  const topN = Math.min(10, teamMeta.length);
   html += `<div class="section-block">
-    <h3>Top ${topN} teams by power score</h3>
+    <h3>Top ${topN} teams by adjusted power score</h3>
     <table>
       <thead>
         <tr>
           <th>Rank</th>
           <th>Team</th>
-          <th>Power score</th>
+          <th>Adj. power</th>
+          <th>Avg age (top 8)</th>
+          <th>G/W/B in top 8</th>
         </tr>
       </thead>
       <tbody>`;
 
   for (let i = 0; i < topN; i++) {
-    const t = teamPower[i];
+    const t = teamMeta[i];
     html += `<tr>
       <td>${i + 1}</td>
       <td>${t.team}${t.team === selectedTeam ? " (you)" : ""}</td>
-      <td>${t.score.toFixed(1)}</td>
+      <td>${t.adjPower.toFixed(1)}</td>
+      <td>${t.avgAge.toFixed(1)}</td>
+      <td>${t.countG}/${t.countW}/${t.countB}</td>
     </tr>`;
   }
 
