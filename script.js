@@ -2,9 +2,20 @@ let allPlayers = [];
 let allTeams = [];
 let globalMedianImpact = 0;
 
+// current selection cache (for re-rendering when filters change)
+let currentMyTeam = null;
+let currentOthers = null;
+let currentFreeAgents = null;
+let currentDraftPicks = null;
+let currentSelectedTeam = null;
+
+// trade targets Ovr filter: "all" | "under55" | "55plus"
+let targetsOvrFilter = "all";
+
 document.addEventListener("DOMContentLoaded", () => {
   const fileInput = document.getElementById("fileInput");
   const teamSelect = document.getElementById("teamSelect");
+  const targetsFilterSelect = document.getElementById("targetsOvrFilter");
 
   fileInput.addEventListener("change", handleFileChange);
   teamSelect.addEventListener("change", () => {
@@ -12,6 +23,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!team) return;
     analyzeTeam(team);
   });
+
+  if (targetsFilterSelect) {
+    targetsFilterSelect.addEventListener("change", () => {
+      targetsOvrFilter = targetsFilterSelect.value;
+      if (currentMyTeam && currentOthers) {
+        renderTargets(currentMyTeam, currentOthers);
+      }
+    });
+  }
 });
 
 function handleFileChange(evt) {
@@ -141,6 +161,12 @@ function analyzeTeam(team) {
   );
 
   if (!myTeam.length) return;
+
+  currentSelectedTeam = team;
+  currentMyTeam = myTeam;
+  currentFreeAgents = freeAgents;
+  currentDraftPicks = draftPicks;
+  currentOthers = others;
 
   renderTeamOverview(myTeam);
   renderLineup(myTeam);
@@ -589,7 +615,7 @@ function categorizePlayer(p, teamMedianImpact) {
     return "Core";
   }
 
-  // Prospect rules (old base rule + new high-potential rules)
+  // Prospect rules (base + high-potential rules)
   const baseProspect = age <= 23 && gap >= 10 && ovr >= 50;
 
   if (highCeilingProspect || eliteCeilingProspect || baseProspect) {
@@ -662,6 +688,15 @@ function renderTargets(myTeam, others) {
 
   others.forEach((p) => {
     const ovr = val(p.Ovr);
+
+    // apply Ovr filter for trade targets
+    if (targetsOvrFilter === "under55" && ovr >= 55) {
+      return;
+    }
+    if (targetsOvrFilter === "55plus" && ovr < 55) {
+      return;
+    }
+
     const age = val(p.Age);
     const pot = val(p.Pot);
     const gap = pot - ovr;
@@ -701,7 +736,7 @@ function renderTargets(myTeam, others) {
 
   if (!top.length) {
     container.innerHTML =
-      "<p>No obvious trade targets based on current thresholds.</p>";
+      "<p>No obvious trade targets based on current thresholds and filter.</p>";
     return;
   }
 
@@ -715,6 +750,7 @@ function renderTargets(myTeam, others) {
         <th>Role</th>
         <th>Age</th>
         <th>Ovr</th>
+        <th>Pot</th>
         <th>Impact</th>
         <th>FitScore</th>
         <th>3Pt</th>
@@ -734,6 +770,7 @@ function renderTargets(myTeam, others) {
       <td>${p.role}</td>
       <td>${p.Age}</td>
       <td>${p.Ovr}</td>
+      <td>${p.Pot}</td>
       <td>${p.impactScore.toFixed(1)}</td>
       <td>${fitScore.toFixed(1)}</td>
       <td>${p["3Pt"]}</td>
