@@ -2,7 +2,7 @@ let allPlayers = [];
 let allTeams = [];
 let globalMedianImpact = 0;
 
-// current selection cache (for re-rendering when filters change)
+// current selection cache
 let currentMyTeam = null;
 let currentOthers = null;
 let currentFreeAgents = null;
@@ -12,12 +12,18 @@ let currentSelectedTeam = null;
 // trade targets Ovr filter: "all" | "under55" | "55plus"
 let targetsOvrFilter = "all";
 
+// remembered targets for advice
+let lastTradeTargets = [];      // [{ player, fitScore }]
+let lastFreeAgentTargets = [];  // [{ player, fitScore }]
+let lastDraftProspects = [];    // [{ player, prospectScore }]
+
 document.addEventListener("DOMContentLoaded", () => {
   const fileInput = document.getElementById("fileInput");
   const teamSelect = document.getElementById("teamSelect");
   const targetsFilterSelect = document.getElementById("targetsOvrFilter");
 
   fileInput.addEventListener("change", handleFileChange);
+
   teamSelect.addEventListener("change", () => {
     const team = teamSelect.value;
     if (!team) return;
@@ -29,6 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
       targetsOvrFilter = targetsFilterSelect.value;
       if (currentMyTeam && currentOthers) {
         renderTargets(currentMyTeam, currentOthers);
+        renderAdvice(currentMyTeam);
       }
     });
   }
@@ -176,6 +183,7 @@ function analyzeTeam(team) {
   renderDraftPicks(myTeam, draftPicks);
   renderSummary(myTeam);
   renderRanking(team);
+  renderAdvice(myTeam);
 }
 
 /* ---------- Roles and impact scores ---------- */
@@ -187,13 +195,14 @@ function addRolesAndScores(players) {
   });
 }
 
+// Treat GF as a guard-type so good GFs can be primary handlers
 function determineRole(posRaw) {
   const pos = (posRaw || "").toUpperCase();
 
   // Perimeter / ball-handler types
   if (pos.includes("PG")) return "G";
   if (pos.includes("SG")) return "G";
-  if (pos.includes("GF")) return "G";  // guard/forward counts as guard-type
+  if (pos.includes("GF")) return "G";
   if (pos === "G") return "G";
 
   // Bigs
@@ -405,47 +414,18 @@ function renderTeamOverview(myTeam) {
 
 /* ---------- Rendering: lineup ---------- */
 
-function renderLineup(myTeam) {
-  const container = document.getElementById("lineup");
-  const players = [...myTeam];
-
-  const starters = pickStarters(players);
-  const starterIds = new Set(starters.map((p) => playerKey(p)));
-  const remaining = players.filter((p) => !starterIds.has(playerKey(p)));
-  const bench = remaining
-    .sort((a, b) => b.impactScore - a.impactScore)
-    .slice(0, Math.min(6, remaining.length));
-
-  let html = "";
-
-  html += `<div class="section-block">
-    <h3>Recommended starting five (2G / 2W / 1B when possible)</h3>
-    ${renderPlayerTable(starters)}
-  </div>`;
-
-  html += `<div class="section-block">
-    <h3>Recommended main bench (next ${
-      bench.length
-    } by impact, up to 6)</h3>
-    ${renderPlayerTable(bench)}
-  </div>`;
-
-  container.innerHTML = html;
-}
-
 function samePlayer(a, b) {
   return a.Name === b.Name && a.Team === b.Team && a.Age === b.Age;
 }
 
 function pickStarters(players) {
-  // Sort all players on your team by impact
   const sorted = [...players].sort((a, b) => b.impactScore - a.impactScore);
 
   if (sorted.length <= 5) {
     return sorted;
   }
 
-  // Start with the 5 best overall
+  // best 5 by impact
   let starters = sorted.slice(0, 5);
 
   const hasRole = (list, role) => list.some((p) => p.role === role);
@@ -453,12 +433,9 @@ function pickStarters(players) {
 
   const replaceLowestNonRole = (list, role, candidate) => {
     if (!candidate) return list;
-
-    // If we already have this role or the candidate is already in, do nothing
-    if (list.some((p) => p.role === role)) return list;
+    if (hasRole(list, role)) return list;
     if (list.some((p) => samePlayer(p, candidate))) return list;
 
-    // Find the lowest-impact player who does NOT have the required role
     let worstIdx = -1;
     let worstImpact = Infinity;
 
@@ -480,29 +457,39 @@ function pickStarters(players) {
   const bestBig = bestWithRole("B");
   const bestGuard = bestWithRole("G");
 
-  // Ensure at least one big and one guard, when the roster has them
+  // ensure at least one big and one guard if possible
   starters = replaceLowestNonRole(starters, "B", bestBig);
   starters = replaceLowestNonRole(starters, "G", bestGuard);
 
   return starters;
 }
 
-function pickFromRole(players, role, count) {
-  const byRole = players
-    .filter((p) => p.role === role)
-    .sort((a, b) => b.impactScore - a.impactScore);
+function renderLineup(myTeam) {
+  const container = document.getElementById("lineup");
+  const players = [...myTeam];
 
-  const chosen = byRole.slice(0, count);
+  const starters = pickStarters(players);
+  const starterIds = new Set(starters.map((p) => playerKey(p)));
+  const remaining = players.filter((p) => !starterIds.has(playerKey(p)));
+  const bench = remaining
+    .sort((a, b) => b.impactScore - a.impactScore)
+    .slice(0, Math.min(6, remaining.length));
 
-  if (chosen.length < count) {
-    const remaining = players.filter((p) => !chosen.includes(p));
-    const sorted = remaining.sort((a, b) => b.impactScore - a.impactScore);
-    while (chosen.length < count && sorted.length) {
-      chosen.push(sorted.shift());
-    }
-  }
+  let html = "";
 
-  return chosen;
+  html += `<div class="section-block">
+    <h3>Recommended starting five (best 5 by impact with ≥1 G and ≥1 B when possible)</h3>
+    ${renderPlayerTable(starters)}
+  </div>`;
+
+  html += `<div class="section-block">
+    <h3>Recommended main bench (next ${
+      bench.length
+    } by impact, up to 6)</h3>
+    ${renderPlayerTable(bench)}
+  </div>`;
+
+  container.innerHTML = html;
 }
 
 function renderPlayerTable(players) {
@@ -647,28 +634,23 @@ function categorizePlayer(p, teamMedianImpact) {
   const gap = pot - ovr;
   const score = p.impactScore || 0;
 
-  // High-ceiling prospects: protect them from being Cut
   const highCeilingProspect = age <= 24 && pot >= 60 && gap >= 8;
   const eliteCeilingProspect = age <= 26 && pot >= 70 && gap >= 5;
 
-  // Clear core players first
   if (ovr >= 60 && score >= teamMedianImpact + 3 && age <= 29) {
     return "Core";
   }
 
-  // Prospect rules (base + high-potential rules)
   const baseProspect = age <= 23 && gap >= 10 && ovr >= 50;
 
   if (highCeilingProspect || eliteCeilingProspect || baseProspect) {
     return "Prospect";
   }
 
-  // Solid rotation piece
   if (ovr >= 55 && score >= teamMedianImpact - 5) {
     return "Rotation";
   }
 
-  // Low-end pieces: can be cut
   if (
     ovr < 50 ||
     (score < teamMedianImpact - 8 && gap < 8 && age >= 25)
@@ -676,7 +658,6 @@ function categorizePlayer(p, teamMedianImpact) {
     return "Cut";
   }
 
-  // Everything else is trade bait / filler
   return "Trade";
 }
 
@@ -686,11 +667,12 @@ function renderTargets(myTeam, others) {
   const container = document.getElementById("targets");
 
   if (!others.length) {
+    lastTradeTargets = [];
     container.innerHTML = "<p>No other players in file.</p>";
     return;
   }
 
-  // mark team stars (top 2 per team) as "less tradable"
+  // mark team stars (top 2 per team)
   const teamPlayersMap = {};
   allPlayers.forEach((p) => {
     if (!teamPlayersMap[p.Team]) {
@@ -730,23 +712,16 @@ function renderTargets(myTeam, others) {
   others.forEach((p) => {
     const ovr = val(p.Ovr);
 
-    // apply Ovr filter for trade targets
-    if (targetsOvrFilter === "under55" && ovr >= 55) {
-      return;
-    }
-    if (targetsOvrFilter === "55plus" && ovr < 55) {
-      return;
-    }
+    if (targetsOvrFilter === "under55" && ovr >= 55) return;
+    if (targetsOvrFilter === "55plus" && ovr < 55) return;
 
     const age = val(p.Age);
     const pot = val(p.Pot);
     const gap = pot - ovr;
     const score = p.impactScore || 0;
 
-    // hard cap: players with Ovr >= 70 treated as never traded
     if (ovr >= 70) return;
 
-    // avoid obvious young stars (top-2 on team, good, <=30)
     if (p._isStar && ovr >= 65 && age <= 30) {
       return;
     }
@@ -774,6 +749,8 @@ function renderTargets(myTeam, others) {
 
   candidates.sort((a, b) => b.fitScore - a.fitScore);
   const top = candidates.slice(0, Math.min(15, candidates.length));
+
+  lastTradeTargets = top;
 
   if (!top.length) {
     container.innerHTML =
@@ -832,6 +809,7 @@ function renderFreeAgents(myTeam, freeAgents) {
   const container = document.getElementById("freeAgents");
 
   if (!freeAgents.length) {
+    lastFreeAgentTargets = [];
     container.innerHTML = "<p>No free agents (Team = FA) in this file.</p>";
     return;
   }
@@ -862,7 +840,6 @@ function renderFreeAgents(myTeam, freeAgents) {
     const gap = pot - ovr;
     const score = p.impactScore || 0;
 
-    // baseline thresholds for FAs
     const isCandidate =
       ovr >= 55 || (age <= 26 && gap >= 8 && score >= globalMedianImpact);
     if (!isCandidate) return;
@@ -881,7 +858,6 @@ function renderFreeAgents(myTeam, freeAgents) {
       fit += Math.max(0, p.Str - 55) * 0.3;
     }
 
-    // small bonus if they're young with upside
     if (age <= 24 && gap >= 10) {
       fit += 5;
     }
@@ -891,6 +867,8 @@ function renderFreeAgents(myTeam, freeAgents) {
 
   candidates.sort((a, b) => b.fitScore - a.fitScore);
   const top = candidates.slice(0, Math.min(15, candidates.length));
+
+  lastFreeAgentTargets = top;
 
   if (!top.length) {
     container.innerHTML =
@@ -947,6 +925,7 @@ function renderDraftPicks(myTeam, draftPicks) {
   const container = document.getElementById("draftPicks");
 
   if (!draftPicks.length) {
+    lastDraftProspects = [];
     container.innerHTML = "<p>No draft picks (Team = DP) in this file.</p>";
     return;
   }
@@ -977,16 +956,13 @@ function renderDraftPicks(myTeam, draftPicks) {
     const gap = pot - ovr;
     const score = p.impactScore || 0;
 
-    // basic prospect viability
     const isProspect =
       age <= 25 && pot >= 60 && gap >= 8 && score >= globalMedianImpact * 0.7;
     if (!isProspect) return;
 
-    // prospect score: mix of current ability, potential, gap, age
     let prospectScore =
       0.4 * score + 0.4 * pot + 0.2 * gap - Math.max(0, age - 22) * 2;
 
-    // adjust for team needs
     if (needShoot) {
       prospectScore += Math.max(0, p["3Pt"] - 55) * 0.3;
     }
@@ -1005,6 +981,8 @@ function renderDraftPicks(myTeam, draftPicks) {
 
   candidates.sort((a, b) => b.prospectScore - a.prospectScore);
   const top = candidates.slice(0, Math.min(15, candidates.length));
+
+  lastDraftProspects = top;
 
   if (!top.length) {
     container.innerHTML =
@@ -1110,7 +1088,7 @@ function renderSummary(myTeam) {
   const playLabel = classify(myPlay, allPlay);
   const defLabel = classify(myDef, allDef);
   const physLabel = classify(myPhys, allPhys);
-  const youthLabel = classify(allAge - myAge, 0, 0.5); // younger is "strong"
+  const youthLabel = classify(allAge - myAge, 0, 0.5);
 
   let html = "<ul class='summary-list'>";
 
@@ -1137,14 +1115,11 @@ function renderSummary(myTeam) {
   container.innerHTML = html;
 }
 
-/* ---------- Rendering: team ranking vs league ---------- */
-
-/* ---------- Rendering: team ranking vs league ---------- */
+/* ---------- Rendering: team ranking vs league (adjusted) ---------- */
 
 function renderRanking(selectedTeam) {
   const container = document.getElementById("ranking");
 
-  // Collect per-team meta: raw power, rotation age, role mix
   const teamMeta = [];
 
   const teamsSet = new Set(
@@ -1155,9 +1130,7 @@ function renderRanking(selectedTeam) {
 
   teamsSet.forEach((team) => {
     const players = allPlayers.filter((p) => p.Team === team);
-    if (!players.length) {
-      return;
-    }
+    if (!players.length) return;
 
     const sorted = [...players].sort(
       (a, b) => b.impactScore - a.impactScore
@@ -1190,7 +1163,7 @@ function renderRanking(selectedTeam) {
       countG,
       countW,
       countB,
-      adjPower: basePower, // will adjust below
+      adjPower: basePower,
     });
   });
 
@@ -1200,28 +1173,23 @@ function renderRanking(selectedTeam) {
     return;
   }
 
-  // League-wide average rotation age
   const leagueAvgAge =
     teamMeta.reduce((s, t) => s + t.avgAge, 0) / teamMeta.length;
 
-  // Apply age and positional adjustments to power score
   teamMeta.forEach((t) => {
     let adj = t.basePower;
 
-    // Age adjustment (older teams tend to underperform talent)
     const ageDiff = t.avgAge - leagueAvgAge;
     if (ageDiff > 3) {
-      adj -= 4; // very old rotation
+      adj -= 4;
     } else if (ageDiff > 1.5) {
-      adj -= 2; // somewhat old
+      adj -= 2;
     } else if (ageDiff < -3) {
-      adj += 2; // very young, some upside
+      adj += 2;
     } else if (ageDiff < -1.5) {
-      adj += 1; // somewhat young
+      adj += 1;
     }
 
-    // Positional balance in top 8
-    // Need at least one guard and one big; depth of each also matters a bit.
     if (t.countG === 0) adj -= 5;
     else if (t.countG === 1) adj -= 2;
 
@@ -1231,12 +1199,9 @@ function renderRanking(selectedTeam) {
     t.adjPower = adj;
   });
 
-  // Sort by adjusted power score
   teamMeta.sort((a, b) => b.adjPower - a.adjPower);
 
-  const rankIndex = teamMeta.findIndex(
-    (t) => t.team === selectedTeam
-  );
+  const rankIndex = teamMeta.findIndex((t) => t.team === selectedTeam);
   if (rankIndex === -1) {
     container.innerHTML =
       "<p>Ranking is only computed for league teams (not FA/DP).</p>";
@@ -1247,7 +1212,6 @@ function renderRanking(selectedTeam) {
   const myEntry = teamMeta[rankIndex];
   const myRank = rankIndex + 1;
 
-  // Heuristic win-range based on rank tier
   let winBandText = "";
   if (myRank <= 3) {
     winBandText =
@@ -1268,7 +1232,6 @@ function renderRanking(selectedTeam) {
     winBandText = "Projected wins: ~25–35 (rebuild tier).";
   }
 
-  // Risk flags for your team
   const warnings = [];
   const ageDiff = myEntry.avgAge - leagueAvgAge;
 
@@ -1306,7 +1269,6 @@ function renderRanking(selectedTeam) {
     );
   }
 
-  // Build HTML
   let html = "";
 
   html += `<div class="section-block">
@@ -1363,6 +1325,329 @@ function renderRanking(selectedTeam) {
   }
 
   html += "</tbody></table></div>";
+
+  container.innerHTML = html;
+}
+
+/* ---------- Rendering: roster improvement advice ---------- */
+
+function renderAdvice(myTeam) {
+  const container = document.getElementById("advice");
+  if (!container) return;
+
+  if (!myTeam || !myTeam.length) {
+    container.innerHTML = "<p>Select a team to see advice.</p>";
+    return;
+  }
+
+  const playersSorted = [...myTeam].sort(
+    (a, b) => b.impactScore - a.impactScore
+  );
+  const topMy = playersSorted.slice(0, Math.min(9, playersSorted.length));
+
+  const avg = (arr) =>
+    arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+
+  const shootingScore = (p) =>
+    0.4 * val(p["3Pt"]) + 0.35 * val(p["2Pt"]) + 0.25 * val(p.FT);
+  const playmakingScore = (p) =>
+    0.4 * val(p.Drb) + 0.4 * val(p.Pss) + 0.2 * val(p.oIQ);
+  const defenseScore = (p) =>
+    0.5 * val(p.dIQ) +
+    0.2 * val(p.Reb) +
+    0.2 * val(p.Str) +
+    0.1 * val(p.Hgt);
+  const physicalScore = (p) =>
+    0.4 * val(p.Str) +
+    0.3 * val(p.End) +
+    0.2 * val(p.Spd) +
+    0.1 * val(p.Jmp);
+
+  const myShoot = avg(topMy.map(shootingScore));
+  const myPlay = avg(topMy.map(playmakingScore));
+  const myDef = avg(topMy.map(defenseScore));
+  const myPhys = avg(topMy.map(physicalScore));
+  const myAge = avg(topMy.map((p) => p.Age));
+  const myPotGap = avg(topMy.map((p) => p.Pot - p.Ovr));
+
+  const topAll = [...allPlayers]
+    .sort((a, b) => b.impactScore - a.impactScore)
+    .slice(0, Math.min(200, allPlayers.length));
+  const allShoot = avg(topAll.map(shootingScore));
+  const allPlay = avg(topAll.map(playmakingScore));
+  const allDef = avg(topAll.map(defenseScore));
+  const allPhys = avg(topAll.map(physicalScore));
+  const allAge = avg(topAll.map((p) => p.Age));
+  const allPotGap = avg(topAll.map((p) => p.Pot - p.Ovr));
+
+  const classify = (myVal, allVal, tol = 3) => {
+    if (myVal >= allVal + tol) return "Strong";
+    if (myVal <= allVal - tol) return "Weak";
+    return "Average";
+  };
+
+  const shootingLabel = classify(myShoot, allShoot);
+  const playLabel = classify(myPlay, allPlay);
+  const defLabel = classify(myDef, allDef);
+  const physLabel = classify(myPhys, allPhys);
+  const youthLabel = classify(allAge - myAge, 0, 0.5);
+
+  const teamScores = [];
+  const teamsSet = new Set(
+    allPlayers
+      .map((p) => p.Team)
+      .filter((t) => t !== "FA" && t !== "DP")
+  );
+  teamsSet.forEach((team) => {
+    const players = allPlayers.filter((p) => p.Team === team);
+    const score = computeTeamPowerScore(players);
+    const sortedTop = [...players].sort(
+      (a, b) => b.impactScore - a.impactScore
+    );
+    const rTop = sortedTop.slice(0, Math.min(8, sortedTop.length));
+    const avgAge =
+      rTop.length === 0
+        ? 0
+        : rTop.reduce((s, x) => s + val(x.Age), 0) / rTop.length;
+    teamScores.push({ team, score, avgAge });
+  });
+
+  teamScores.sort((a, b) => b.score - a.score);
+  const myIdx = teamScores.findIndex(
+    (t) => t.team === currentSelectedTeam
+  );
+  const myRank = myIdx >= 0 ? myIdx + 1 : null;
+  const totalTeams = teamScores.length;
+  const leagueAvgAge =
+    teamScores.reduce((s, t) => s + t.avgAge, 0) / totalTeams;
+
+  let tier = "Unknown";
+  let winBandText = "";
+  if (myRank !== null) {
+    if (myRank <= 3) {
+      tier = "title contender";
+      winBandText = "roughly 52–60 wins in expectation.";
+    } else if (myRank <= 6) {
+      tier = "strong playoff team";
+      winBandText = "roughly 48–55 wins in expectation.";
+    } else if (myRank <= 10) {
+      tier = "playoff-caliber team";
+      winBandText = "roughly 44–52 wins in expectation.";
+    } else if (myRank <= 16) {
+      tier = "fringe playoff / play-in team";
+      winBandText = "roughly 38–46 wins in expectation.";
+    } else if (myRank <= 22) {
+      tier = "lottery team";
+      winBandText = "roughly 32–40 wins in expectation.";
+    } else {
+      tier = "rebuild team";
+      winBandText = "roughly 25–35 wins in expectation.";
+    }
+  }
+
+  const impacts = myTeam
+    .map((p) => p.impactScore)
+    .sort((a, b) => a - b);
+  const medianImpact =
+    impacts.length === 0
+      ? 0
+      : impacts.length % 2
+      ? impacts[Math.floor(impacts.length / 2)]
+      : (impacts[impacts.length / 2 - 1] +
+          impacts[impacts.length / 2]) /
+        2;
+
+  const groups = {
+    Core: [],
+    Rotation: [],
+    Prospect: [],
+    Trade: [],
+    Cut: [],
+  };
+
+  myTeam.forEach((p) => {
+    const cat = categorizePlayer(p, medianImpact);
+    groups[cat].push(p);
+  });
+
+  const byImpactDesc = (arr) =>
+    arr.slice().sort((a, b) => b.impactScore - a.impactScore);
+
+  const core = byImpactDesc(groups.Core);
+  const rotation = byImpactDesc(groups.Rotation);
+  const prospects = byImpactDesc(groups.Prospect);
+  const tradeChips = byImpactDesc(
+    groups.Trade.filter((p) => p.Ovr >= 55)
+  );
+  const cutCandidates = byImpactDesc(groups.Cut);
+
+  const listNames = (players, max = 4) =>
+    players.slice(0, max).map((p) => p.Name).join(", ");
+
+  const needShoot = shootingLabel === "Weak";
+  const needDef = defLabel === "Weak";
+  const needGuardDepth = myTeam.filter((p) => p.role === "G").length <= 2;
+  const needBigDepth = myTeam.filter((p) => p.role === "B").length <= 2;
+
+  const pickMatches = (source, filterFn, max = 3) =>
+    source
+      .filter(({ player }) => filterFn(player))
+      .slice(0, max)
+      .map(({ player }) => `${player.Name} (${player.Team})`)
+      .join(", ");
+
+  const tradeShooters = needShoot
+    ? pickMatches(
+        lastTradeTargets,
+        (p) => p["3Pt"] >= 65 && p.Ovr >= 55
+      )
+    : "";
+  const tradeDefenders = needDef
+    ? pickMatches(
+        lastTradeTargets,
+        (p) => p.dIQ >= 65 && p.Reb >= 55
+      )
+    : "";
+  const faGuards = needGuardDepth
+    ? pickMatches(
+        lastFreeAgentTargets,
+        (p) => p.role === "G" && p.Ovr >= 55
+      )
+    : "";
+  const faBigs = needBigDepth
+    ? pickMatches(
+        lastFreeAgentTargets,
+        (p) => p.role === "B" && p.Ovr >= 55
+      )
+    : "";
+
+  const topProspectsNames = listNames(prospects, 5);
+  const topDraftNames = lastDraftProspects
+    .slice(0, 4)
+    .map(({ player }) => player.Name)
+    .join(", ");
+
+  const strengths = [];
+  const weaknesses = [];
+
+  if (shootingLabel === "Strong") strengths.push("perimeter shooting");
+  if (playLabel === "Strong") strengths.push("playmaking");
+  if (defLabel === "Strong") strengths.push("team defense");
+  if (physLabel === "Strong") strengths.push("physicality / rebounding");
+
+  if (shootingLabel === "Weak") weaknesses.push("perimeter shooting");
+  if (playLabel === "Weak") weaknesses.push("ball handling / creation");
+  if (defLabel === "Weak") weaknesses.push("defense");
+  if (physLabel === "Weak") weaknesses.push("physicality / rebounding");
+
+  const strengthsText = strengths.length
+    ? strengths.join(", ")
+    : "no clear standout strengths (overall balanced)";
+  const weaknessesText = weaknesses.length
+    ? weaknesses.join(", ")
+    : "no glaring weaknesses (main improvements are marginal upgrades)";
+
+  let html = `<div class="section-block">
+    <h3>High-level plan</h3>
+    <p>You currently project as a <strong>${tier}</strong>${
+    myRank
+      ? ` (rank ${myRank} of ${totalTeams}, ${winBandText})`
+      : ""
+  }</p>
+    <p><strong>Team profile:</strong> strengths in ${strengthsText}; weaknesses in ${weaknessesText}. Avg age ${myAge.toFixed(
+    1
+  )} vs league ${allAge.toFixed(
+    1
+  )}; Pot–Ovr gap ${myPotGap.toFixed(1)} vs ${allPotGap.toFixed(
+    1
+  )}.</p>
+  </div>`;
+
+  html += `<div class="section-block">
+    <h3>1) Clean up the bottom of the roster</h3>`;
+
+  if (cutCandidates.length) {
+    html += `<p><strong>Cut or salary-dump:</strong> ${listNames(
+      cutCandidates,
+      5
+    )}. These players are either low-impact or older with limited upside.</p>`;
+  } else {
+    html += `<p>No obvious pure cut candidates based on current thresholds.</p>`;
+  }
+
+  if (tradeChips.length) {
+    html += `<p><strong>Primary trade chips:</strong> ${listNames(
+      tradeChips,
+      5
+    )}. These are decent players but not core pieces, and can be packaged for upgrades.</p>`;
+  }
+
+  html += `</div>`;
+
+  html += `<div class="section-block">
+    <h3>2) Targeted upgrades</h3>`;
+
+  if (needShoot) {
+    html += `<p><strong>Add shooting:</strong> prioritize guards/wings with 3Pt ≥ 65.`;
+    if (tradeShooters) {
+      html += ` Possible trade targets: ${tradeShooters}.`;
+    }
+    html += `</p>`;
+  }
+
+  if (needDef) {
+    html += `<p><strong>Improve defense:</strong> look for bigs/wings with dIQ ≥ 65 and Reb ≥ 55.`;
+    if (tradeDefenders) {
+      html += ` Possible trade targets: ${tradeDefenders}.`;
+    }
+    html += `</p>`;
+  }
+
+  if (needGuardDepth) {
+    html += `<p><strong>Guard depth:</strong> you have limited playable guards.`;
+    if (faGuards) {
+      html += ` Consider signing: ${faGuards}.`;
+    } else {
+      html += ` Use trades or the draft to add at least one solid rotation guard.`;
+    }
+    html += `</p>`;
+  }
+
+  if (needBigDepth) {
+    html += `<p><strong>Big depth:</strong> you are light on bigs in your top 8.`;
+    if (faBigs) {
+      html += ` Consider signing: ${faBigs}.`;
+    } else {
+      html += ` Look to trade for or draft a rotation big with strength, rebounding, and defense.`;
+    }
+    html += `</p>`;
+  }
+
+  if (
+    !needShoot &&
+    !needDef &&
+    !needGuardDepth &&
+    !needBigDepth
+  ) {
+    html += `<p>Your main path to improvement is upgrading your weakest starter using the trade chips above for a higher-impact player (Ovr ≥ 60, impactScore above team median).</p>`;
+  }
+
+  html += `</div>`;
+
+  html += `<div class="section-block">
+    <h3>3) Develop and protect your prospects</h3>`;
+
+  if (prospects.length) {
+    html += `<p><strong>Key prospects to prioritize:</strong> ${topProspectsNames}. Avoid cutting or attaching them lightly in trades; they are your main internal upside.</p>`;
+  } else {
+    html += `<p>No strong internal prospects identified by the current rules (Pot ≥ 60 with headroom). The draft and trades are your main paths to long-term upside.</p>`;
+  }
+
+  if (lastDraftProspects.length) {
+    html += `<p><strong>Draft focus:</strong> top prospects in your file include ${topDraftNames}. Use them as reference profiles: prioritize players with high potential and ratings that address your current weaknesses.</p>`;
+  }
+
+  html += `</div>`;
 
   container.innerHTML = html;
 }
